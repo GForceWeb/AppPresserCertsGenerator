@@ -1,0 +1,173 @@
+# More documentation about how to customize your build
+# can be found here:
+# https://docs.fastlane.tools
+
+fastlane_version "2.99.1"
+default_platform :ios
+
+
+#Fill These based on your app data
+
+site_slug = "mysiteslug"    ##This is the slug at the end of your MyAppPresser URL. IE: myapppresser.com/mysiteslug
+app_name = "My Cool App"  ##This is the Name of your app as set under the Settings -> App Name field
+app_id = "com.mycoolapp.app"  ##This is your app ID as set under the Settings -> App ID field. NOTE: If you have an existing app this MUST match the bundle ID of the existing app
+username = "dan@macfadyens.com" ##Your Apple account Username
+iospassword = "apppresser"  ##The Password for your iOS Certificates (dev, prod & prodpush). This will be required in Bitrise to unlock the certs as well as MyAppPresser in the push notification settings.
+
+##LEAVE BLANK unless you're using a shared account with access to multiple teams
+#To get Team ID, run fastlane appp and take the correct team ID from the first prompt then kill the script
+team_id = ""
+
+##Create an android keystore by running "fastlane android". Alias will be the same as the filename
+#Android Keystore Variables ## Use fastlane android to generate these
+custname = "Bob Jones"  ##Replace with your name
+countrycode = "US"  ##Your 2 letter Country Code.
+keystorepassword = "MyAppPresser"  ##Replace this with your own password for the Keystore. MAKE SURE YOU SAVE THIS PW. You'll need to enter it into Bitrise later
+
+#Change to false if re-running the tool with a pre-existing push cert to avoid creating duplicates
+forcepush = "true"
+
+## No More edits required below ##
+
+
+# Folder Setups
+app_name = app_name.downcase
+app_name = app_name.gsub(' ','-')
+app_name = app_name.delete('|')
+app_name = app_name.delete('&')
+app_name = app_name.delete("'")
+app_folder = site_slug+"/"+app_name
+
+Dir.chdir("..") do
+    sh("mkdir -p #{app_folder}")
+    sh("mkdir -p #{app_folder}/upload-to-myapppresser")
+    sh("mkdir -p #{app_folder}/bitrise")
+end    
+
+
+lane :android do
+
+    dname = 'cn='+custname+', ou='+app_name+', o='+app_name+', c='+countrycode
+    Dir.chdir("..") do
+        sh("keytool -genkey -v -keystore #{app_folder}/bitrise/#{app_name}.keystore -alias #{app_name} -keyalg RSA -keysize 2048 -validity 10000 -storepass #{keystorepassword} -keypass #{keystorepassword} -dname '#{dname}'")
+    end
+end
+lane :ios do
+
+    time = Time.new
+    day = time.day
+    month = time.month
+    year = time.year
+    date = "#{day}-#{month}-#{year}"
+    
+    # create app in account
+    produce(
+           username: "#{username}",
+           app_identifier: "#{app_id}",
+           app_name: "#{app_name}",
+           company_name: "#{app_name}",
+           skip_itc: true, # don't create app in itunes connect
+           # enable_services: {
+           #   in_app_purchase: "on"
+           # }
+           team_id: "#{team_id}",
+    )
+    
+    register_devices(
+        devices: {
+            "AppPresserGrant" => "00008020-001A34323690003A",
+            "AppPresserScott" => "5609cc213e9c6687f74cd5c52d15446feb3aafe2"
+        },
+        username: "#{username}"
+    )
+    # generate dev cert   
+    cert(
+       development: true,
+       username: "#{username}",
+       output_path: "./#{app_folder}",
+       filename: "dev_#{app_id}.cer",
+       force: false,
+       team_id: "#{team_id}",
+       generate_apple_certs: true,
+
+    )
+    devcertid = lane_context[SharedValues::CERT_CERTIFICATE_ID]
+    puts "#{devcertid}"
+    # development provisioning profile
+    sigh(
+      development: true,
+      app_identifier: "#{app_id}",
+      username: "#{username}",
+      skip_install: true,
+      output_path: "./#{app_folder}",
+      filename: "dev_#{app_id}.mobileprovision",
+      team_id: "#{team_id}",
+      # force: true
+    )
+
+    # generate prod cert
+    cert(
+        username: "#{username}",
+        output_path: "./#{app_folder}",
+        filename: "prod_#{app_id}.cer",
+        force: false,
+        team_id: "#{team_id}",
+        generate_apple_certs: true,
+    )
+    prodcertid = lane_context[SharedValues::CERT_CERTIFICATE_ID]
+    puts "#{prodcertid}"
+    # push certs
+    pem(
+        app_identifier: "#{app_id}",
+        username: "#{username}",
+        p12_password: "#{iospassword}",
+        generate_p12: true,
+        output_path: "./#{app_folder}",
+        force: "#{forcepush}",
+        team_id: "#{team_id}",
+    )
+    # app store provisioning profile
+    sigh(
+        app_identifier: "#{app_id}",
+        username: "#{username}",
+        skip_install: true,
+        filename: "prod_#{app_id}.mobileprovision",
+        output_path: "./#{app_folder}",
+        team_id: "#{team_id}",
+    )
+
+    # adhoc provisioning profile
+    sigh(
+      adhoc: true,
+      app_identifier: "#{app_id}",
+      skip_install: true,
+      username: "#{username}",
+      output_path: "./#{app_folder}",
+      filename: "adhoc_#{app_id}.mobileprovision",
+      team_id: "#{team_id}",
+    )
+
+    Dir.chdir("..") do
+       #Move the raw Certs to central storage
+       sh("cp #{app_folder}/#{devcertid}.p12 fastlane/certificates/#{devcertid}.p12 2>/dev/null || :")
+       sh("cp #{app_folder}/#{prodcertid}.p12 fastlane/certificates/#{prodcertid}.p12 2>/dev/null || :")
+       #Make the dev build .p12
+       sh("openssl x509 -in #{app_folder}/dev_#{app_id}.cer -inform DER -out #{app_folder}/dev_#{app_id}.pem -outform PEM")
+       sh("openssl pkcs12 -export -out #{app_folder}/dev_#{app_id}.p12 -inkey fastlane/certificates/#{devcertid}.p12 -in #{app_folder}/dev_#{app_id}.pem -password pass:#{iospassword}")
+       #Make the prod build .p12
+       sh("openssl x509 -in #{app_folder}/prod_#{app_id}.cer -inform DER -out #{app_folder}/prod_#{app_id}.pem -outform PEM")
+       sh("openssl pkcs12 -export -out #{app_folder}/prod_#{app_id}.p12 -inkey fastlane/certificates/#{prodcertid}.p12 -in #{app_folder}/prod_#{app_id}.pem -password pass:#{iospassword}")
+       #MyAppPresser Push Files
+       sh("cp #{app_folder}/prod_#{app_id}.mobileprovision #{app_folder}/upload-to-myapppresser/")
+       sh("cp #{app_folder}/production_#{app_id}.p12 #{app_folder}/upload-to-myapppresser/")
+       #Bitrise Files
+       sh("cp #{app_folder}/dev_#{app_id}.p12 #{app_folder}/bitrise")
+       sh("cp #{app_folder}/prod_#{app_id}.p12 #{app_folder}/bitrise")
+       sh("cp #{app_folder}/dev_#{app_id}.mobileprovision #{app_folder}/bitrise")
+       sh("cp #{app_folder}/adhoc_#{app_id}.mobileprovision #{app_folder}/bitrise")
+       sh("cp #{app_folder}/prod_#{app_id}.mobileprovision #{app_folder}/bitrise")
+       #Copy Fastfile to folder on successful run
+       sh("cp fastlane/Fastfile #{app_folder}/Fastfile#{date}")
+
+    end
+end
