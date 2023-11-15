@@ -153,10 +153,10 @@ lane :ios do
        sh("cp #{app_folder}/#{prodcertid}.p12 fastlane/certificates/#{prodcertid}.p12 2>/dev/null || :")
        #Make the dev build .p12
        sh("openssl x509 -in #{app_folder}/dev_#{app_id}.cer -inform DER -out #{app_folder}/dev_#{app_id}.pem -outform PEM")
-       sh("openssl pkcs12 -export -out #{app_folder}/dev_#{app_id}.p12 -inkey fastlane/certificates/#{devcertid}.p12 -in #{app_folder}/dev_#{app_id}.pem -password pass:#{iospassword}")
+       sh("openssl pkcs12 -export -out #{app_folder}/dev_#{app_id}.p12 -inkey fastlane/certificates/#{devcertid}.p12 -in #{app_folder}/dev_#{app_id}.pem -password pass:#{iospassword} -legacy")
        #Make the prod build .p12
        sh("openssl x509 -in #{app_folder}/prod_#{app_id}.cer -inform DER -out #{app_folder}/prod_#{app_id}.pem -outform PEM")
-       sh("openssl pkcs12 -export -out #{app_folder}/prod_#{app_id}.p12 -inkey fastlane/certificates/#{prodcertid}.p12 -in #{app_folder}/prod_#{app_id}.pem -password pass:#{iospassword}")
+       sh("openssl pkcs12 -export -out #{app_folder}/prod_#{app_id}.p12 -inkey fastlane/certificates/#{prodcertid}.p12 -in #{app_folder}/prod_#{app_id}.pem -password pass:#{iospassword} -legacy")
        #MyAppPresser Push Files
        sh("cp #{app_folder}/prod_#{app_id}.mobileprovision #{app_folder}/upload-to-myapppresser/")
        sh("cp #{app_folder}/production_#{app_id}.p12 #{app_folder}/upload-to-myapppresser/")
